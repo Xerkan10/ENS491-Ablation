@@ -1,4 +1,3 @@
-Attack,Avg_Benign_Concordance,Std_Benign_Concordance,Avg_Byzantine_Concordance,Std_Byzantine_Concordance,Avg_Cross_Concordance,Std_Cross_Concordance,Final_Accuracy
-alie,0.1059,0.0992,0.9612,0.0068,0.1584,0.1235,96.71
-label_flip,0.5903,0.0504,0.5140,0.0467,-0.4958,0.1220,1.09
-ipm,0.0968,0.1122,0.9716,0.0052,-0.2301,0.1158,96.75
+Attack,Benign_Concordance,Byzantine_Concordance,Final_Accuracy
+alie,0.0410,0.2268,96.62
+ipm,0.0072,0.0316,96.59

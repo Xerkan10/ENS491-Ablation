@@ -9,6 +9,7 @@ from collections import defaultdict
 from mapper import Mapper
 from fl import FL
 import time
+import matplotlib.pyplot as plt
 
 class ConcordanceAnalyzer:
     """
@@ -50,10 +51,8 @@ class ConcordanceAnalyzer:
         """
         Compute concordance ratio ρ_k for a specific client k.
         
-        Formula (5) from paper: ρ_k = max[0, (1/K) * Σ_{ℓ∈K} sgn(ω(g_k, g_ℓ))]
-        
-        This measures how well client k's gradient aligns with the majority.
-        Higher ρ_k indicates honest behavior, lower indicates potential Byzantine.
+        Computes pairwise concordance of client k with ALL other clients,
+        then returns the average.
         
         Args:
             client_grad: Gradient tensor of client k
@@ -61,23 +60,21 @@ class ConcordanceAnalyzer:
             client_idx: Index of client k in all_grads
             
         Returns:
-            Concordance ratio ρ_k between 0 and 1
+            Average concordance ratio for client k
         """
         K = len(all_grads)
         if K <= 1:
             return 0.0
         
-        # Sum of sign(ω(g_k, g_ℓ)) for all other clients ℓ
-        sign_sum = 0.0
+        # Compute pairwise concordance with all other clients and average
+        concordances = []
         for l_idx, grad_l in enumerate(all_grads):
             if l_idx != client_idx:
                 omega = self.compute_pairwise_concordance(client_grad, grad_l)
-                sign_sum += np.sign(omega)
+                concordances.append(omega)
         
-        # ρ_k = max[0, (1/K) * Σ sgn(ω)]
-        rho_k = max(0.0, sign_sum / K)
-        
-        return rho_k
+        # Return average concordance
+        return float(np.mean(concordances)) if concordances else 0.0
     
     def compute_group_concordance(self, grads: List[torch.Tensor]) -> Dict[str, float]:
         """
@@ -109,73 +106,62 @@ class ConcordanceAnalyzer:
     def compute_all_client_concordance_ratios(self, all_grads: List[torch.Tensor], 
                                                num_benign: int) -> Dict[str, Any]:
         """
-        Compute concordance ratio ρ_k for all clients and categorize by type.
+        Compute concordance ratio for all clients and categorize by type.
+        
+        For each client k:
+            1. Compute pairwise concordance with ALL other clients
+            2. Average to get individual concordance ratio ρ_k
+        
+        For benign/Byzantine groups:
+            Average the individual concordance ratios of clients in that group
         
         Args:
             all_grads: List of all client gradient tensors (benign first, then Byzantine)
             num_benign: Number of benign clients
             
         Returns:
-            Dictionary with per-client ρ values and statistics for benign/Byzantine groups
+            Dictionary with per-client concordance values and group statistics
         """
+        # Step 1: Compute individual client concordance ratios
+        # Each client's concordance = average pairwise concordance with all other clients
         all_rhos = []
         for k in range(len(all_grads)):
             rho_k = self.compute_client_concordance_ratio(all_grads[k], all_grads, k)
             all_rhos.append(rho_k)
         
+        # Step 2: Separate into benign and Byzantine groups
         benign_rhos = all_rhos[:num_benign]
         byzantine_rhos = all_rhos[num_benign:] if num_benign < len(all_grads) else []
+        
+        # Step 3: Compute group concordance = average of individual concordance ratios
+        benign_group_avg = float(np.mean(benign_rhos)) if benign_rhos else 0.0
         
         result = {
             "all_rhos": all_rhos,
             "benign_rhos": {
                 "values": benign_rhos,
-                "mean": float(np.mean(benign_rhos)) if benign_rhos else 0.0,
+                "mean": benign_group_avg,
                 "std": float(np.std(benign_rhos)) if benign_rhos else 0.0,
                 "min": float(np.min(benign_rhos)) if benign_rhos else 0.0,
                 "max": float(np.max(benign_rhos)) if benign_rhos else 0.0,
+                "group_avg": benign_group_avg,  # Same as mean - average of individual client concordances
             }
         }
         
         if byzantine_rhos:
+            byzantine_group_avg = float(np.mean(byzantine_rhos))
+            
             result["byzantine_rhos"] = {
                 "values": byzantine_rhos,
-                "mean": float(np.mean(byzantine_rhos)),
+                "mean": byzantine_group_avg,
                 "std": float(np.std(byzantine_rhos)),
                 "min": float(np.min(byzantine_rhos)),
                 "max": float(np.max(byzantine_rhos)),
+                "group_avg": byzantine_group_avg,  # Same as mean - average of individual client concordances
             }
         
         return result
     
-    def compute_cross_group_concordance(self, benign_grads: List[torch.Tensor], 
-                                       byzantine_grads: List[torch.Tensor]) -> Dict[str, float]:
-        """
-        Compute concordance between benign and Byzantine groups.
-        
-        Args:
-            benign_grads: List of benign client gradients
-            byzantine_grads: List of Byzantine client gradients
-            
-        Returns:
-            Dictionary with mean, std, min, and max cross-group concordance values
-        """
-        if len(benign_grads) == 0 or len(byzantine_grads) == 0:
-            return {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0, "count": 0}
-        
-        concordances = []
-        for benign_grad in benign_grads:
-            for byzantine_grad in byzantine_grads:
-                conc = self.compute_pairwise_concordance(benign_grad, byzantine_grad)
-                concordances.append(conc)
-        
-        return {
-            "mean": float(np.mean(concordances)),
-            "std": float(np.std(concordances)),
-            "min": float(np.min(concordances)),
-            "max": float(np.max(concordances)),
-            "count": len(concordances)
-        }
     
     def analyze_round(self, fl_coordinator: FL, round_num: int, attack_name: str) -> Dict:
         """
@@ -194,34 +180,24 @@ class ConcordanceAnalyzer:
         
         # Separate benign and Byzantine gradients
         num_benign = len(fl_coordinator.benign_clients)
-        benign_grads = all_grads[:num_benign]
-        byzantine_grads = all_grads[num_benign:]
         
-        # Compute concordance metrics for benign clients
-        benign_concordance = self.compute_group_concordance(benign_grads)
-        
-        # Compute per-client concordance ratios ρ_k (key metric from paper Formula 5)
-        client_rhos = self.compute_all_client_concordance_ratios(all_grads, num_benign)
+        # Compute concordance ratios for each group
+        # Each group's concordance = average pairwise concordance of that group's clients with ALL clients
+        client_concordances = self.compute_all_client_concordance_ratios(all_grads, num_benign)
         
         results = {
             "round": round_num,
             "epoch": float(fl_coordinator.epoch),
             "attack": attack_name,
-            "benign_intra_concordance": benign_concordance,
-            "client_concordance_ratios": client_rhos,  # Per-client ρ_k values
+            "client_concordance_ratios": client_concordances,
+            "benign_concordance": client_concordances["benign_rhos"]["group_avg"],  # Single value for benign group
             "avg_train_loss": float(fl_coordinator.avg_train_loss),
             "num_diverged": float(fl_coordinator.num_diverged),
         }
         
-        # Compute concordance metrics for Byzantine clients (if any)
-        if len(byzantine_grads) > 0:
-            byzantine_concordance = self.compute_group_concordance(byzantine_grads)
-            cross_concordance = self.compute_cross_group_concordance(benign_grads, byzantine_grads)
-            
-            results.update({
-                "byzantine_intra_concordance": byzantine_concordance,
-                "benign_byzantine_cross_concordance": cross_concordance,
-            })
+        # Add Byzantine concordance if there are Byzantine clients
+        if "byzantine_rhos" in client_concordances:
+            results["byzantine_concordance"] = client_concordances["byzantine_rhos"]["group_avg"]  # Single value for Byzantine group
         
         # Perform aggregation
         fl_coordinator.aggregate(all_grads)
@@ -266,38 +242,29 @@ class ConcordanceAnalyzer:
         with open(summary_file, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
-                "Attack", "Avg_Benign_Concordance", "Std_Benign_Concordance",
-                "Avg_Byzantine_Concordance", "Std_Byzantine_Concordance",
-                "Avg_Cross_Concordance", "Std_Cross_Concordance",
-                "Final_Accuracy"
+                "Attack", "Benign_Concordance", "Byzantine_Concordance", "Final_Accuracy"
             ])
             
             for attack_name, attack_data in self.results.items():
                 rounds_data = attack_data["rounds"]
                 
-                benign_conc = [r["benign_intra_concordance"]["mean"] for r in rounds_data]
+                # Get final round concordance values
+                final_benign_conc = rounds_data[-1]["benign_concordance"]
                 final_acc = rounds_data[-1]["test_accuracy"]
                 
-                if "byzantine_intra_concordance" in rounds_data[0]:
-                    byz_conc = [r["byzantine_intra_concordance"]["mean"] for r in rounds_data]
-                    cross_conc = [r["benign_byzantine_cross_concordance"]["mean"] for r in rounds_data]
-                    
+                if "byzantine_concordance" in rounds_data[-1]:
+                    final_byz_conc = rounds_data[-1]["byzantine_concordance"]
                     writer.writerow([
                         attack_name,
-                        f"{np.mean(benign_conc):.4f}",
-                        f"{np.std(benign_conc):.4f}",
-                        f"{np.mean(byz_conc):.4f}",
-                        f"{np.std(byz_conc):.4f}",
-                        f"{np.mean(cross_conc):.4f}",
-                        f"{np.std(cross_conc):.4f}",
+                        f"{final_benign_conc:.4f}",
+                        f"{final_byz_conc:.4f}",
                         f"{final_acc:.2f}"
                     ])
                 else:
                     writer.writerow([
                         attack_name,
-                        f"{np.mean(benign_conc):.4f}",
-                        f"{np.std(benign_conc):.4f}",
-                        "N/A", "N/A", "N/A", "N/A",
+                        f"{final_benign_conc:.4f}",
+                        "N/A",
                         f"{final_acc:.2f}"
                     ])
         
@@ -319,39 +286,206 @@ class ConcordanceAnalyzer:
         print(f"Attack: {attack_name}")
         print(f"{'='*60}")
         
-        # Compute averages across rounds
-        benign_conc = [r["benign_intra_concordance"]["mean"] for r in rounds_data]
-        test_accs = [r["test_accuracy"] for r in rounds_data]
+        # Get final round metrics
+        final_round = rounds_data[-1]
+        final_acc = final_round["test_accuracy"]
+        benign_conc = final_round["benign_concordance"]
         
-        print(f"Benign Intra-Concordance:")
-        print(f"  Mean: {np.mean(benign_conc):.4f} ± {np.std(benign_conc):.4f}")
-        print(f"  Range: [{np.min(benign_conc):.4f}, {np.max(benign_conc):.4f}]")
-        print(f"\nFinal Test Accuracy: {test_accs[-1]:.2f}%")
+        print(f"\nFinal Test Accuracy: {final_acc:.2f}%")
+        print(f"\nConcordance Ratios (avg pairwise concordance with all clients):")
+        print(f"  Benign group: {benign_conc:.4f}")
         
-        # Print per-client concordance ratio ρ_k statistics (key metric from paper)
-        if "client_concordance_ratios" in rounds_data[-1]:
-            last_rhos = rounds_data[-1]["client_concordance_ratios"]
-            benign_rho_stats = last_rhos["benign_rhos"]
-            print(f"\nPer-Client Concordance Ratio ρ_k (Formula 5):")
-            print(f"  Benign clients ρ: {benign_rho_stats['mean']:.4f} ± {benign_rho_stats['std']:.4f}")
-            print(f"  Benign ρ range: [{benign_rho_stats['min']:.4f}, {benign_rho_stats['max']:.4f}]")
-            
-            if "byzantine_rhos" in last_rhos:
-                byz_rho_stats = last_rhos["byzantine_rhos"]
-                print(f"  Byzantine clients ρ: {byz_rho_stats['mean']:.4f} ± {byz_rho_stats['std']:.4f}")
-                print(f"  Byzantine ρ range: [{byz_rho_stats['min']:.4f}, {byz_rho_stats['max']:.4f}]")
+        if "byzantine_concordance" in final_round:
+            byz_conc = final_round["byzantine_concordance"]
+            print(f"  Byzantine group: {byz_conc:.4f}")
         
-        if len(rounds_data) > 0 and "byzantine_intra_concordance" in rounds_data[0]:
-            byz_conc = [r["byzantine_intra_concordance"]["mean"] for r in rounds_data]
-            cross_conc = [r["benign_byzantine_cross_concordance"]["mean"] for r in rounds_data]
+        # Print individual client concordance values
+        if "client_concordance_ratios" in final_round:
+            rhos = final_round["client_concordance_ratios"]
+            print(f"\nIndividual Client Concordances:")
+            print(f"  Benign clients: {rhos['benign_rhos']['values']}")
+            if "byzantine_rhos" in rhos:
+                print(f"  Byzantine clients: {rhos['byzantine_rhos']['values']}")
+    
+    def plot_concordance_distribution(self, output_dir: str = "./ablation_results"):
+        """
+        Plot the distribution of concordance ratios for all clients.
+        Creates separate plots for each attack showing benign vs Byzantine client distributions.
+        
+        Args:
+            output_dir: Directory to save plots
+        """
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        
+        for attack_name, attack_data in self.results.items():
+            if "rounds" not in attack_data or len(attack_data["rounds"]) == 0:
+                continue
             
-            print(f"\nByzantine Intra-Concordance (ω):")
-            print(f"  Mean: {np.mean(byz_conc):.4f} ± {np.std(byz_conc):.4f}")
-            print(f"  Range: [{np.min(byz_conc):.4f}, {np.max(byz_conc):.4f}]")
+            # Get the last round's concordance ratios
+            last_round = attack_data["rounds"][-1]
+            if "client_concordance_ratios" not in last_round:
+                continue
             
-            print(f"\nBenign-Byzantine Cross-Concordance (ω):")
-            print(f"  Mean: {np.mean(cross_conc):.4f} ± {np.std(cross_conc):.4f}")
-            print(f"  Range: [{np.min(cross_conc):.4f}, {np.max(cross_conc):.4f}]")
+            rhos_data = last_round["client_concordance_ratios"]
+            benign_rhos = rhos_data["benign_rhos"]["values"]
+            byzantine_rhos = rhos_data.get("byzantine_rhos", {}).get("values", [])
+            all_rhos = rhos_data["all_rhos"]
+            
+            # Create figure with subplots
+            fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+            fig.suptitle(f'Concordance Ratio Distribution - {attack_name}', fontsize=14, fontweight='bold')
+            
+            # Plot 1: Bar chart showing individual client concordance ratios
+            ax1 = axes[0]
+            num_benign = len(benign_rhos)
+            num_byzantine = len(byzantine_rhos)
+            total_clients = num_benign + num_byzantine
+            
+            colors = ['green'] * num_benign + ['red'] * num_byzantine
+            client_indices = list(range(total_clients))
+            
+            bars = ax1.bar(client_indices, all_rhos, color=colors, alpha=0.7, edgecolor='black')
+            ax1.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+            ax1.set_xlabel('Client Index', fontsize=11)
+            ax1.set_ylabel('Concordance Ratio', fontsize=11)
+            ax1.set_title('Individual Client Concordance Ratios', fontsize=12)
+            ax1.set_xticks(client_indices)
+            
+            # Add legend
+            from matplotlib.patches import Patch
+            legend_elements = [Patch(facecolor='green', alpha=0.7, edgecolor='black', label=f'Benign ({num_benign})'),
+                             Patch(facecolor='red', alpha=0.7, edgecolor='black', label=f'Byzantine ({num_byzantine})')]
+            ax1.legend(handles=legend_elements, loc='upper right')
+            
+            # Add horizontal lines for group averages
+            benign_mean = rhos_data["benign_rhos"]["mean"]
+            ax1.axhline(y=benign_mean, color='darkgreen', linestyle='-', linewidth=2, 
+                       label=f'Benign Avg: {benign_mean:.3f}')
+            if byzantine_rhos:
+                byz_mean = rhos_data["byzantine_rhos"]["mean"]
+                ax1.axhline(y=byz_mean, color='darkred', linestyle='-', linewidth=2,
+                           label=f'Byzantine Avg: {byz_mean:.3f}')
+            
+            # Add text annotations for means
+            ax1.text(total_clients - 0.5, benign_mean, f'Benign Avg: {benign_mean:.3f}', 
+                    color='darkgreen', fontsize=9, va='bottom')
+            if byzantine_rhos:
+                ax1.text(total_clients - 0.5, byz_mean, f'Byzantine Avg: {byz_mean:.3f}', 
+                        color='darkred', fontsize=9, va='bottom')
+            
+            # Plot 2: Histogram/Distribution comparison
+            ax2 = axes[1]
+            
+            if byzantine_rhos:
+                # Create overlapping histograms
+                bins = np.linspace(min(all_rhos) - 0.1, max(all_rhos) + 0.1, 20)
+                ax2.hist(benign_rhos, bins=bins, alpha=0.6, color='green', label=f'Benign (n={num_benign})', edgecolor='black')
+                ax2.hist(byzantine_rhos, bins=bins, alpha=0.6, color='red', label=f'Byzantine (n={num_byzantine})', edgecolor='black')
+                ax2.legend(loc='upper right')
+            else:
+                bins = np.linspace(min(all_rhos) - 0.1, max(all_rhos) + 0.1, 20)
+                ax2.hist(benign_rhos, bins=bins, alpha=0.6, color='green', label=f'Benign (n={num_benign})', edgecolor='black')
+                ax2.legend(loc='upper right')
+            
+            ax2.set_xlabel('Concordance Ratio', fontsize=11)
+            ax2.set_ylabel('Frequency', fontsize=11)
+            ax2.set_title('Distribution of Concordance Ratios', fontsize=12)
+            ax2.axvline(x=0, color='gray', linestyle='--', alpha=0.5)
+            
+            # Add statistics text box
+            stats_text = f"Benign: μ={benign_mean:.3f}, σ={rhos_data['benign_rhos']['std']:.3f}"
+            if byzantine_rhos:
+                byz_mean = rhos_data["byzantine_rhos"]["mean"]
+                byz_std = rhos_data["byzantine_rhos"]["std"]
+                stats_text += f"\nByzantine: μ={byz_mean:.3f}, σ={byz_std:.3f}"
+            
+            ax2.text(0.02, 0.98, stats_text, transform=ax2.transAxes, fontsize=9,
+                    verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+            
+            plt.tight_layout()
+            
+            # Save plot
+            plot_file = os.path.join(output_dir, f"concordance_distribution_{attack_name}.png")
+            plt.savefig(plot_file, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            print(f"Plot saved to {plot_file}")
+        
+        # Create a combined plot comparing all attacks
+        self._plot_combined_comparison(output_dir)
+    
+    def _plot_combined_comparison(self, output_dir: str):
+        """
+        Create a combined plot comparing concordance ratios across all attacks.
+        
+        Args:
+            output_dir: Directory to save plots
+        """
+        if len(self.results) == 0:
+            return
+        
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        attack_names = []
+        benign_means = []
+        benign_stds = []
+        byzantine_means = []
+        byzantine_stds = []
+        
+        for attack_name, attack_data in self.results.items():
+            if "rounds" not in attack_data or len(attack_data["rounds"]) == 0:
+                continue
+            
+            last_round = attack_data["rounds"][-1]
+            if "client_concordance_ratios" not in last_round:
+                continue
+            
+            rhos_data = last_round["client_concordance_ratios"]
+            
+            attack_names.append(attack_name)
+            benign_means.append(rhos_data["benign_rhos"]["mean"])
+            benign_stds.append(rhos_data["benign_rhos"]["std"])
+            
+            if "byzantine_rhos" in rhos_data:
+                byzantine_means.append(rhos_data["byzantine_rhos"]["mean"])
+                byzantine_stds.append(rhos_data["byzantine_rhos"]["std"])
+            else:
+                byzantine_means.append(0)
+                byzantine_stds.append(0)
+        
+        if len(attack_names) == 0:
+            return
+        
+        x = np.arange(len(attack_names))
+        width = 0.35
+        
+        bars1 = ax.bar(x - width/2, benign_means, width, yerr=benign_stds, 
+                       label='Benign', color='green', alpha=0.7, capsize=5)
+        bars2 = ax.bar(x + width/2, byzantine_means, width, yerr=byzantine_stds,
+                       label='Byzantine', color='red', alpha=0.7, capsize=5)
+        
+        ax.set_xlabel('Attack Type', fontsize=11)
+        ax.set_ylabel('Average Concordance Ratio', fontsize=11)
+        ax.set_title('Concordance Ratio Comparison Across Attacks', fontsize=14, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels(attack_names, rotation=45, ha='right')
+        ax.legend()
+        ax.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+        
+        # Add value labels on bars
+        for bar, mean in zip(bars1, benign_means):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(), f'{mean:.3f}',
+                   ha='center', va='bottom', fontsize=8)
+        for bar, mean in zip(bars2, byzantine_means):
+            if mean != 0:
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(), f'{mean:.3f}',
+                       ha='center', va='bottom', fontsize=8)
+        
+        plt.tight_layout()
+        
+        plot_file = os.path.join(output_dir, "concordance_comparison_all_attacks.png")
+        plt.savefig(plot_file, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Combined comparison plot saved to {plot_file}")
 
 
 def extract_scalar_from_args(args):
@@ -435,28 +569,20 @@ def run_ablation_test(args: argparse.Namespace, attack_configs: List[Dict]) -> C
             
             # Print epoch summary
             if len(epoch_rounds) > 0:
-                avg_benign_conc = np.mean([r["benign_intra_concordance"]["mean"] for r in epoch_rounds])
                 last_acc = epoch_rounds[-1]["test_accuracy"]
                 last_loss = epoch_rounds[-1]["avg_train_loss"]
-                
-                # Get per-client concordance ratio ρ_k stats (key metric)
-                last_rhos = epoch_rounds[-1]["client_concordance_ratios"]
-                benign_rho_mean = last_rhos["benign_rhos"]["mean"]
+                benign_conc = epoch_rounds[-1]["benign_concordance"]
                 
                 info_parts = [
                     f"Epoch {epoch + 1:3d}",
                     f"Acc: {last_acc:5.1f}%",
                     f"Loss: {last_loss:.4f}",
-                    f"ω_benign: {avg_benign_conc:.4f}",
-                    f"ρ_benign: {benign_rho_mean:.4f}"
+                    f"Benign Conc: {benign_conc:.4f}"
                 ]
                 
-                if "byzantine_intra_concordance" in epoch_rounds[-1]:
-                    avg_byz_conc = np.mean([r["byzantine_intra_concordance"]["mean"] for r in epoch_rounds])
-                    cross_conc = epoch_rounds[-1]["benign_byzantine_cross_concordance"]["mean"]
-                    byz_rho_mean = last_rhos.get("byzantine_rhos", {}).get("mean", 0.0)
-                    info_parts.append(f"ω_byz: {avg_byz_conc:.4f}")
-                    info_parts.append(f"ρ_byz: {byz_rho_mean:.4f}")
+                if "byzantine_concordance" in epoch_rounds[-1]:
+                    byz_conc = epoch_rounds[-1]["byzantine_concordance"]
+                    info_parts.append(f"Byzantine Conc: {byz_conc:.4f}")
                 
                 print(" | ".join(info_parts))
             
@@ -503,7 +629,7 @@ if __name__ == "__main__":
     attack_configs = [
         #{"name": "NoAttack_Baseline", "attack": "label_flip", "traitor": 0.0},  # Baseline: no Byzantine clients
         {"name": "alie", "attack": "alie", "traitor": 0.2},
-        {"name": "label_flip", "attack": "label_flip", "traitor": 0.2},
+        #{"name": "label_flip", "attack": "label_flip", "traitor": 0.2},
         {"name": "ipm", "attack": "ipm", "traitor": 0.2},
     ]
     
@@ -519,5 +645,8 @@ if __name__ == "__main__":
     # Save results
     output_dir = f"./ablation_results/{args.dataset_name}_{args.nn_name}_{args.aggr}"
     analyzer.save_results(output_dir)
+    
+    # Generate concordance distribution plots
+    analyzer.plot_concordance_distribution(output_dir)
     
     print(f"\nAblation test complete! Results saved to {output_dir}")
