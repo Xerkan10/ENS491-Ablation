@@ -55,7 +55,7 @@ The experiments use the following default configuration (see [parameters.py](par
 | `dataset_name` | MNIST      | Dataset used                                       |
 | `nn_name`      | mnistnet   | Neural network architecture                        |
 | `attack`       | ALIE / IPM | Attack type (varies by experiment)                 |
-| `aggr`         | Bulyan     | Aggregation method                                 |
+| `aggr`         | avg     | Aggregation method                                 |
 | `dataset_dist` | IID        | Data distribution                                  |
 | `bs`           | 32         | Batch size                                         |
 | `lr`           | 0.1        | Learning rate                                      |
