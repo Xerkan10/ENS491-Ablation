@@ -15,9 +15,9 @@ def args_parser():
     parser.add_argument('--localIter', type=int, default=1, help='Local Epoch')
     parser.add_argument('--num_client', type=int, default=25, help='number of clients')
     parser.add_argument('--cl_part', type=float, default=1., help='participation ratio of the clients')
-    parser.add_argument('--traitor', type=list, default=[0.2], help='traitor ratio')
-    parser.add_argument('--attack', type=list, default=['alie','ipm','minmax','label_flip'], help='see Attacks')
-    parser.add_argument('--aggr', type=list, default=['lasa','bulyan','krum','tm'], help='see aggregators.py')
+    parser.add_argument('--traitor', type=float, default=0.2, help='traitor ratio')
+    parser.add_argument('--attack', type=str, default='alie', help='see Attacks')
+    parser.add_argument('--aggr', type=str, default='bulyan', help='see aggregators.py')
     parser.add_argument('--hybrid_aggregator_list', type=str, default='cc+tm', 
                         help='List of aggregators for hybrid aggregation last one does final aggregation')
     parser.add_argument('--embd_momentum', type=bool, default=False, help='FedADC embedded momentum')
@@ -26,21 +26,21 @@ def args_parser():
     parser.add_argument('--bucketing', type=bool, default=False, help='Bucket the clients before aggregation')
     parser.add_argument('--bucket_type', type=str, default='Random', 
                         help='Type of bucketing, Random, Cosine Distance, L2 distance')
-    parser.add_argument('--bucket_size', type=list, default=[3], help='bucket length for sequential cc')
+    parser.add_argument('--bucket_size', type=int, default=3, help='bucket length for sequential cc')
 
 
     # Defence params
     parser.add_argument('--tau', type=list, default=[1], help='Radius of the ball for CC aggregator')
     parser.add_argument('--n_iter', type=list, default=[1], help='number of iteration for cc aggr')
-    parser.add_argument('--buck_rand', type=list, default=[False], help='bucket random selection for sequential cc')
-    parser.add_argument('--buck_len', type=list, default=[3], help='bucket length for sequential cc')
-    parser.add_argument('--buck_len_ecc', type=list, default=[3], help='bucket length for sequential cc in ecc')
-    parser.add_argument('--buck_avg', type=list, default=[False], help='average the bucket for sequential cc')
-    parser.add_argument('--multi_clip', type=bool, default=[False], help='average the bucket for sequential cc')
-    parser.add_argument('--bucket_op', type=list, default=[None], help='Operations if last bucket is size 1 [None, merge, split]')
-    parser.add_argument('--ref_fixed', type=bool, default=[False], help='static reference for sequential ECC cc')
-    parser.add_argument('--shuffle_bucket_order', type=bool, default=[False], help='shuffle the bucket order for sequential cc L2')
-    parser.add_argument('--combine_bucket', type=bool, default=[False], help='combine the bucket for sequential cc L2')
+    parser.add_argument('--buck_rand', type=bool, default=False, help='bucket random selection for sequential cc')
+    parser.add_argument('--buck_len', type=int, default=3, help='bucket length for sequential cc')
+    parser.add_argument('--buck_len_ecc', type=int, default=3, help='bucket length for sequential cc in ecc')
+    parser.add_argument('--buck_avg', type=bool, default=False, help='average the bucket for sequential cc')
+    parser.add_argument('--multi_clip', type=bool, default=False, help='average the bucket for sequential cc')
+    parser.add_argument('--bucket_op', type=str, default=None, help='Operations if last bucket is size 1 [None, merge, split]')
+    parser.add_argument('--ref_fixed', type=bool, default=False, help='static reference for sequential ECC cc')
+    parser.add_argument('--shuffle_bucket_order', type=bool, default=False, help='shuffle the bucket order for sequential cc L2')
+    parser.add_argument('--combine_bucket', type=bool, default=False, help='combine the bucket for sequential cc L2')
     parser.add_argument('--T', type=int, default=3, help='RFA inner iteration')
     parser.add_argument('--nu', type=float, default=0.1, help='RFA norm budget')
     parser.add_argument('--gas_p', type=int, default=1000, help='Number of chunks for GAS')
@@ -64,9 +64,9 @@ def args_parser():
 
     # attack params
     parser.add_argument('--z_max', type=list, default=[None], help='attack scale,none for auto generate')
-    parser.add_argument('--alie_z_max', type=list, default=[None], help='attack scale for ALIE attack')
+    parser.add_argument('--alie_z_max', type=float, default=None, help='attack scale for ALIE attack')
     parser.add_argument('--nestrov_attack', type=bool, default=False, help='clean step first- For non-omniscient attacks')
-    parser.add_argument('--epsilon', type=list, default=[0.2], help='IPM attack scale')
+    parser.add_argument('--epsilon', type=float, default=0.2, help='IPM attack scale')
     parser.add_argument('--pert_vec', type=str, default='std', help='[unit_vec,sign,std] for minmax and minsum attacks')
     parser.add_argument('--delta_coeff', type=list, default=[.9], help='[unit_vec,sign,std] for minmax and minsum attacks')
 
@@ -80,9 +80,9 @@ def args_parser():
     # optimiser related
     parser.add_argument('--opt', type=str, default='sgd', help='name of the optimiser')
     parser.add_argument('--lr', type=float, default=0.1, help='learning_rate')
-    parser.add_argument('--lr_decay', type=float, default=[75], help='lr drop at given epoch')
+    parser.add_argument('--lr_decay', type=list, default=[75], help='lr drop at given epoch')
     parser.add_argument('--wd', type=float, default=0, help='weight decay Value')
-    parser.add_argument('--Lmomentum', type=list, default=[.9], help='Local Momentum for SGD')
+    parser.add_argument('--Lmomentum', type=float, default=0.9, help='Local Momentum for SGD')
     parser.add_argument('--betas', type=tuple, default=(0.9,0.999), help='betas for adam and adamw opts')
     parser.add_argument('--worker_momentum', type=bool, default=True, help='adam like gradiant multiplier for SGD (1-Lmomentum)')
     parser.add_argument('--nesterov', type=bool, default=False, help='nestrov momentum for Local SGD steps')

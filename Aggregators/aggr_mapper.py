@@ -29,6 +29,7 @@ from .med_krum import MedKrum
 from .foundation import FoundationFL, FoundationFL_TrimmedMean, FoundationFL_Median
 from .lasa import LASA
 from .signguard import SignGuard
+from .fedseca import FedSECA, FedSECA_NoMomentum
 
 
 aggr_mapper = {'cc': Clipping, 'cm': CM, 'krum': Krum, 'rfa': RFA, 'tm': TM,'avg':fedAVG,
@@ -42,7 +43,8 @@ aggr_mapper = {'cc': Clipping, 'cm': CM, 'krum': Krum, 'rfa': RFA, 'tm': TM,'avg
                'tm_capped': TM_capped,'tm_abs': TM_Abs,
                'med_krum': MedKrum, 'foundation': FoundationFL, 
                'foundation_tm': FoundationFL_TrimmedMean, 'foundation_med': FoundationFL_Median,
-               'lasa': LASA, 'signguard': SignGuard}
+               'lasa': LASA, 'signguard': SignGuard,
+               'fedseca': FedSECA, 'fedseca_nomom': FedSECA_NoMomentum}
 
 def get_bucketing(args):
     bucketing = Bucketing(args.buck_len, args.bucket_type, args.bucket_op)
@@ -114,6 +116,11 @@ def set_aggr_params(args,num_client,b,net_ps,device,**kwargs):
                   'clustering_method': getattr(args, 'signguard_clustering', 'meanshift'),
                   'iterations': getattr(args, 'signguard_iterations', 1),
                   'eps': getattr(args, 'signguard_eps', 0.05),
-                  'min_samples': getattr(args, 'signguard_min_samples', 2)}
+                  'min_samples': getattr(args, 'signguard_min_samples', 2)},
+    'fedseca': {'mom_beta': getattr(args, 'fedseca_mom_beta', 0.9),
+                'tm_gamma': getattr(args, 'fedseca_tm_gamma', 0.1),
+                'device': device},
+    'fedseca_nomom': {'mom_beta': 0.0, 'tm_gamma': getattr(args, 'fedseca_tm_gamma', 0.1),
+                      'device': device}
     }
     return aggr_params
