@@ -88,11 +88,6 @@ Each directory contains the following files for each round:
 | File                                                                 | Description                                              |
 | -------------------------------------------------------------------- | -------------------------------------------------------- |
 | `round_X_concordance_numeric.png` / `round_X_similarity_numeric.png` | **Matrix visualization with numeric values**             |
-| `round_X_heatmap.png`                                                | Color-coded heatmap visualization                        |
-| `round_X_graph.png`                                                  | Network graph visualization (blue=benign, red=Byzantine) |
-| `round_X_concordance.csv` / `round_X_similarity.csv`                 | Raw matrix data (CSV format)                             |
-| `round_X_concordance.npy` / `round_X_similarity.npy`                 | NumPy array format                                       |
-| `round_X_concordance.txt` / `round_X_similarity.txt`                 | Human-readable text format                               |
 | `summary.json`                                                       | Aggregated statistics across all rounds                  |
 
 ---
